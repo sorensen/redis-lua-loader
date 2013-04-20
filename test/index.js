@@ -3,11 +3,26 @@
 var assert = require('assert')
   , ase = assert.strictEqual
   , fs = require('fs')
-  , Lua = require('../lib/lua')
-  , utils = require('../lib/utils')
+  , Lua = require('../index')
   , redis = require('redis')
   , path = __dirname + '/lua'
   , files = fs.readdirSync(path)
+
+/**
+ * Convert string into camel case
+ *
+ * @param {String} input
+ * @return {String} output
+ */
+
+function camelCase(str) { 
+  return str
+    .replace('_', '-')
+    .toLowerCase()
+    .replace(/-(.)/g, function(match, group) {
+      return group.toUpperCase()
+    })
+}
 
 describe('Lua', function() {
   var db = redis.createClient()
@@ -35,7 +50,7 @@ describe('Lua', function() {
 
   it('should have created a method for each script loaded', function() {
     files.forEach(function(file) {
-      var name = utils.camelCase(file.replace('.lua', ''))
+      var name = camelCase(file.replace('.lua', ''))
       ase(typeof lua[name], 'function')
     })
   })
@@ -64,7 +79,7 @@ describe('Lua', function() {
       files.forEach(function(file) {
         file = file.replace('.lua', '')
         ase(typeof lua3.shas[file], 'string')
-        ase(typeof lua3[utils.camelCase(file)], 'function')
+        ase(typeof lua3[camelCase(file)], 'function')
       })
       done()
     })

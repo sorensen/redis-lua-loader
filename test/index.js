@@ -26,7 +26,7 @@ function camelCase(str) {
 
 describe('Lua', function() {
   var db = redis.createClient()
-    , lua = new Lua(db, {dirname: path})
+    , lua = new Lua(db, path)
 
   it('should emit a `ready` event', function(done) {
     lua.ready ? done() : lua.on('ready', done)
@@ -37,14 +37,14 @@ describe('Lua', function() {
   })
 
   it('should have loaded all lua scripts', function() {
-    ase(files.length, Object.keys(lua.shas).length)
+    ase(files.length, Object.keys(lua.__shas).length)
     files.forEach(function(file) {
-      ase(typeof lua.shas[file.replace('.lua', '')], 'string')
+      ase(typeof lua.getSHA(file.replace('.lua', '')), 'string')
     })
   })
 
   it('should create a script wrapper function', function() {
-    var fn = lua.wrapScript('test')
+    var fn = lua.scriptWrap('test')
     ase(typeof fn, 'function')
   })
 
@@ -56,29 +56,25 @@ describe('Lua', function() {
   })
 
   it('should work with a custom directory', function(done) {
-    var lua2 = new Lua(db, {
-      dirname: __dirname + '/lua2'
-    })
+    var lua2 = new Lua(db, __dirname + '/lua2')
     lua2.on('ready', function() {
-      ase(typeof lua2.shas['return-one'], 'string')
+      ase(typeof lua2.getSHA('returnOne'), 'string')
       ase(typeof lua2.returnOne, 'function')
       done()
     })
   })
 
   it('should load multiple directories', function(done) {
-    var lua3 = new Lua(db, {
-      dirname: [
-        __dirname + '/lua'
-      , __dirname + '/lua2'
-      ]
-    })
+    var lua3 = new Lua(db, [
+      __dirname + '/lua'
+    , __dirname + '/lua2'
+    ])
     lua3.on('ready', function() {
-      ase(typeof lua3.shas.test, 'string')
+      ase(typeof lua3.__shas.test, 'string')
       ase(typeof lua3.test, 'function')
       files.forEach(function(file) {
         file = file.replace('.lua', '')
-        ase(typeof lua3.shas[file], 'string')
+        ase(typeof lua3.getSHA(file), 'string')
         ase(typeof lua3[camelCase(file)], 'function')
       })
       done()
@@ -87,7 +83,7 @@ describe('Lua', function() {
 
   it('should throw when wrapping a non-loaded script', function() {
     assert.throws(function() {
-      lua.wrapScript('foobar')
+      lua.scriptWrap('foobar')
     })
   })
 

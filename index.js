@@ -10,6 +10,7 @@ var EventEmitter = require('events').EventEmitter
   , slice = Array.prototype.slice
   , concat = Array.prototype.concat
   , toString = Object.prototype.toString
+  , info = require('./package.json')
   , noop = function() {}
 
 /**
@@ -67,7 +68,7 @@ function Lua(client, dirname, iterator) {
 
   // Wait for redis client ready event
   if (this.client.ready) ready()
-  else this.client.on('ready', ready) 
+  else this.client.on('ready', ready)
 }
 
 /*!
@@ -75,6 +76,12 @@ function Lua(client, dirname, iterator) {
  */
 
 Lua.prototype.__proto__ = EventEmitter.prototype
+
+/*!
+ * Current library version, should match `package.json`
+ */
+
+Lua.VERSION = info.version
 
 /**
  * Create a function wrapper for executing a given Lua script name

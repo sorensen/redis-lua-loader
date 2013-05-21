@@ -2,7 +2,7 @@
   "author": "Beau Sorensen <mail@beausorensen.com> (http://github.com/sorensen)"
 , "name": "redis-lua-loader"
 , "description": "Redis lua script utility"
-, "version": "0.0.1"
+, "version": "0.0.2"
 , "license": "MIT"
 , "repository": {
     "type": "git"

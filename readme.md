@@ -54,26 +54,43 @@ Create a function wrapper for a given script name.
 
 ### instance.scriptLoad(name, source, [callback])
 
+<<<<<<< HEAD
 Create a function wrapper for a given script name.
+=======
+Load the given lua `source` code into redis, assigning a function wrapper 
+with the given `name` to the current instance. If there is a naming conflict, 
+a wrapper will not be created.  Callback will have the saved SHA and unassigned 
+script wrapper.
+>>>>>>> 0821832e27f8b765850ff1ae4259244210360433
 
 * `name` - name alias to save script as, will be saved as a wrapped method
 * `source` - lua source code of the script
 * `callback` - standard callback
 
 ```js
+var Lua = require('redis-lua-loader')
+  , redis = require('redis')
+  , db = redis.createClient()
+  , lua = new Lua(db)
+
+fs.readFile('/path/to/script.lua', 'utf8', function(err, source) {
+  lua.scriptLoad('fancy', source, function(err, sha, wrapped) {
+    typeof lua.fancy === 'function'
+    lua.fancy === wrapped
+  })  
+})
 ```
 
 
 ### instance.scriptLoadAll(directory, [callback])
 
 Load all files in a given directory and pass each one into `instance.scriptLoad` 
-with the filename and source code.
+with the filename and source code. All filenames found will be passed through the 
+`iterator` used to create the instance, or by default it will camelCase the filename 
+by splitting `-` and `_`.
 
 * `directory` - string directory path
 * `callback` - standard callback
-
-```js
-```
 
 
 ### instance.scriptKill([callback])

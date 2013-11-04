@@ -89,10 +89,10 @@ describe('Lua', function() {
 
   it('should emit `error` events when loading bad scripts', function(done) {
     var eLua = new Lua(db, __dirname + '/lua3')
-    // eLua.on('error', function(err) {
-    //   ase(err instanceof Error, true)
-    //   done()
-    // })
+    eLua.on('error', function(err) {
+      ase(err instanceof Error, true)
+      done()
+    })
     eLua.on('ready', function() {
       throw new Error('Should not have made it to `ready` state')
     })

@@ -9,6 +9,8 @@ var EventEmitter = require('events').EventEmitter
   , slice = Array.prototype.slice
   , concat = Array.prototype.concat
   , toString = Object.prototype.toString
+  , info = require('./package.json')
+  , noop = function() {}
 
 /**
  * Convert string into camel case
@@ -42,10 +44,12 @@ function Lua(client, dirname, iterator) {
   this.client = client
   this.__shas = {}
   this.namer = iterator || camelCase
-  this.dir = dirname
-  if (!this.dir) {
+
+  if (!dirname) {
     throw new Error('A directory path is required.')
   }
+  this.dir = dirname || []
+
   // Ensure the directory is an array
   if (!Array.isArray(this.dir)) {
     this.dir = [this.dir]
@@ -67,7 +71,7 @@ function Lua(client, dirname, iterator) {
 
   // Wait for redis client ready event
   if (this.client.ready) ready()
-  else this.client.on('ready', ready) 
+  else this.client.on('ready', ready)
 }
 
 /*!
@@ -75,6 +79,12 @@ function Lua(client, dirname, iterator) {
  */
 
 Lua.prototype.__proto__ = EventEmitter.prototype
+
+/*!
+ * Current library version, should match `package.json`
+ */
+
+Lua.VERSION = info.version
 
 /**
  * Create a function wrapper for executing a given Lua script name

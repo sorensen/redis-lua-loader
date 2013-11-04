@@ -121,7 +121,7 @@ Lua.prototype.scriptLoad = function(name, source, next) {
   // Prevent naming conflicts
   if (self.hasOwnProperty(name)) {
     ok = false
-    console.warn('Script naming conflict for `' + fnName + '`. Function not set.')
+    console.warn('Script naming conflict for `' + name + '`. Function not set.')
     console.trace()
   }
   this.client.send_command('SCRIPT', ['LOAD', source], function(err, sha) {

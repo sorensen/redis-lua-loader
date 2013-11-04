@@ -6,7 +6,6 @@
 
 var EventEmitter = require('events').EventEmitter
   , fs = require('fs')
-  , redis = require('redis')
   , slice = Array.prototype.slice
   , concat = Array.prototype.concat
   , toString = Object.prototype.toString
@@ -20,7 +19,8 @@ var EventEmitter = require('events').EventEmitter
 
 function camelCase(str) { 
   return str
-    .replace('_', '-')
+    .replace(/_/g, '-')
+    .replace(/\//g, '-')
     .toLowerCase()
     .replace(/-(.)/g, function(match, group) {
       return group.toUpperCase()
@@ -36,12 +36,13 @@ function camelCase(str) {
  * @event `ready`: Emitted when redis client connected and scripts loaded
  */
 
-function Lua(client, options) {
+function Lua(client, dirname, iterator) {
   var self = this, len = 1
   this.ready = false
   this.client = client
-  this.shas = {}
-  this.dir = (options || {}).dirname
+  this.__shas = {}
+  this.namer = iterator || camelCase
+  this.dir = dirname
   if (!this.dir) {
     throw new Error('A directory path is required.')
   }
@@ -61,7 +62,7 @@ function Lua(client, options) {
   }
   // Load all scripts for the given directories before emitting
   this.dir.forEach(function(dir) { 
-    self.loadScripts(dir, ready)
+    self.scriptLoadAll(dir, ready)
   })
 
   // Wait for redis client ready event
@@ -76,17 +77,16 @@ function Lua(client, options) {
 Lua.prototype.__proto__ = EventEmitter.prototype
 
 /**
- * Create a function wrapper for executing a given Lua
- * script, uses the camelCase version of the filename
+ * Create a function wrapper for executing a given Lua script name
  *
- * @param {String} script name
+ * @param {String} script name (filename with no extention)
  * @return {Function} wrapper
  * @api public
  */
 
-Lua.prototype.wrapScript = function(name) {
+Lua.prototype.scriptWrap = function(name) {
   var self = this
-    , sha = this.shas[name]
+    , sha = this.__shas[name]
     , client = this.client
   if (!sha) throw new Error('Script name `' + name + '` does not exist.')
   return function() {
@@ -104,17 +104,25 @@ Lua.prototype.wrapScript = function(name) {
  * @api public
  */
 
-Lua.prototype.loadScript = function(name, source, next) {
+Lua.prototype.scriptLoad = function(name, source, next) {
   var self = this
-    , camel = camelCase(name)
+    , ok = true, fn
 
+  // Prevent naming conflicts
+  if (self.hasOwnProperty(name)) {
+    ok = false
+    console.warn('Script naming conflict for `' + fnName + '`. Function not set.')
+    console.trace()
+  }
   this.client.send_command('SCRIPT', ['LOAD', source], function(err, sha) {
     if (err) {
-      throw new Error('Unable to load script: `' + name + '` - ' + err)
+      if (next) return next(err)
+      return self.emit('error', new Error('Unable to load script: `' + name + '` - ' + err))
     }
-    self.shas[name] = sha
-    self[camel] = self.wrapScript(name)
-    return next && next(sha)
+    self.__shas[name] = sha
+    fn = self.scriptWrap(name)
+    ok && (self[name] = fn)
+    return next && next(null, sha, fn)
   })
 }
 
@@ -126,21 +134,75 @@ Lua.prototype.loadScript = function(name, source, next) {
  * @api public
  */
 
-Lua.prototype.loadScripts = function(dir, next) {
+Lua.prototype.scriptLoadAll = function(dir, next) {
   var self = this
+    , resp = []
+    , len = 0
+    , fnName
+  
+  function callback() {
+    --len || next && next(null, resp)
+  }
+  function isDir(path) {
+    self.scriptLoadAll(path, function(err, resp) {
+      resp && (resp = resp.concat(resp))
+      callback()
+    })
+  }
+  function isFile(path, file) {
+    fs.readFile(path, 'utf-8', function(err, source) {
+      if (err) {
+        if (next) return next(err)
+        return self.emit('error', new Error('Error reading file `' + file + '` - ' + err))
+      }
+      fnName = self.namer(file.replace('.lua', ''))
+      self.scriptLoad(fnName, source, function(err) {
+        if (err) {
+          return self.emit('error', new Error('Unable to load script: `' + file + '` - ' + err))
+        }
+        resp.push(slice.call(arguments))
+        callback()
+      })
+    })
+  }
   fs.readdir(dir, function(err, files) {
-    var len = files.length
+    len = files.length
+    if (!len) return next(null, resp)
     if (err) {
-      throw new Error('Could not load scripts from dir `' + dir + '` ' + err)
+      if (next) return next(err)
+      return self.emit('error', new Error('Could not load scripts from dir `' + dir + '` ' + err))
     }
     files.forEach(function(file, key) {
-      fs.readFile(dir + '/' + file, 'utf-8', function(err, source) {
-        self.loadScript(file.replace('.lua', ''), source, function(sha) {
-          --len || next && next()    
-        })
+      var path = dir + '/' + file
+      fs.stat(path, function(err, stats) {
+        if (stats.isDirectory()) return isDir(path)
+        if (stats.isFile() && !!~file.indexOf('.lua')) return isFile(path, file)
+        callback()
       })
     })
   })
+  return this
+}
+
+/**
+ * Simple getter for finding the SHA for a given script name
+ *
+ * @param {String} script name
+ * @return {String} redis generated SHA
+ */
+
+Lua.prototype.getSHA = function(name) {
+  return this.__shas[name]
+}
+
+/**
+ * Shortcut to redis `SCRIPT KILL` command
+ *
+ * @param {Function} callback
+ */
+
+Lua.prototype.scriptKill = function(next) {
+  this.client.send_command('SCRIPT', 'KILL', next)
   return this
 }
 

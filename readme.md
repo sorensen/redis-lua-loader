@@ -18,7 +18,7 @@ methods to call any of the scripts found in the directory.
 Methods
 -------
 
-### new Lua(client, directories, iterator)
+### new Lua(client, options)
 
 Constructor method, will automatically read the directories provided, load the 
 files, and save them into redis, normally this is the only thing you will have 
@@ -26,18 +26,25 @@ to do to start using the library. This will emit a `ready` event when all script
 have been loaded and the redis client is ready to use.
 
 * `client` - redis client
-* `directories` - a string directory or array of string directories
-* `iterator` - custom naming iterator, (optional, default camel casing function)
+* `option` - config object
+  - `src` - a string directory or array of string directories
+  - `iterator` - custom naming iterator, (optional, default camel casing function)
 
 ```js
 var Lua = require('redis-lua-loader')
   , redis = require('redis')
   , db = redis.createClient()
 
-var lua = new Lua(db, 'path/to/lua/scripts')
+var lua = new Lua(db, {
+  src: 'path/to/lua/scripts'
+})
 
 lua.on('ready', function() {
   // start using your lua scripts!
+})
+
+lua.on('error', function(err) {
+  // oh nooooz!
 })
 ```
 
@@ -54,14 +61,11 @@ Create a function wrapper for a given script name.
 
 ### instance.scriptLoad(name, source, [callback])
 
-<<<<<<< HEAD
-Create a function wrapper for a given script name.
-=======
+
 Load the given lua `source` code into redis, assigning a function wrapper 
 with the given `name` to the current instance. If there is a naming conflict, 
 a wrapper will not be created.  Callback will have the saved SHA and unassigned 
 script wrapper.
->>>>>>> 0821832e27f8b765850ff1ae4259244210360433
 
 * `name` - name alias to save script as, will be saved as a wrapped method
 * `source` - lua source code of the script

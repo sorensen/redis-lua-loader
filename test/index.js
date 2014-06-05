@@ -26,7 +26,7 @@ function camelCase(str) {
 
 describe('Lua', function() {
   var db = redis.createClient()
-    , lua = new Lua(db, path)
+    , lua = new Lua(db, {src: path})
 
   it('should emit a `ready` event', function(done) {
     lua.ready ? done() : lua.on('ready', done)
@@ -56,7 +56,9 @@ describe('Lua', function() {
   })
 
   it('should work with a custom directory', function(done) {
-    var lua2 = new Lua(db, __dirname + '/lua2')
+    var lua2 = new Lua(db, {
+      src: __dirname + '/lua2'
+    })
     lua2.on('ready', function() {
       ase(typeof lua2.getSHA('returnOne'), 'string')
       ase(typeof lua2.returnOne, 'function')
@@ -65,10 +67,12 @@ describe('Lua', function() {
   })
 
   it('should load multiple directories', function(done) {
-    var lua3 = new Lua(db, [
-      __dirname + '/lua'
-    , __dirname + '/lua2'
-    ])
+    var lua3 = new Lua(db, {
+      src: [
+        __dirname + '/lua'
+      , __dirname + '/lua2'
+      ]
+    })
     lua3.on('ready', function() {
       ase(typeof lua3.__shas.test, 'string')
       ase(typeof lua3.test, 'function')
@@ -88,7 +92,9 @@ describe('Lua', function() {
   })
 
   it('should emit `error` events when loading bad scripts', function(done) {
-    var eLua = new Lua(db, __dirname + '/lua3')
+    var eLua = new Lua(db, {
+      src: __dirname + '/lua3'
+    })
     eLua.on('error', function(err) {
       ase(err instanceof Error, true)
       done()

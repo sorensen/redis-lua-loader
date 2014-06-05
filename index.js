@@ -34,21 +34,32 @@ function camelCase(str) {
  *
  * @param {Object} redis client
  * @param {Object} options (optional)
+ *   - `src` {String|Array} lua script directory
+ *   - `iterator` {Function} filename to method namer
+ *   - `preload` {Boolean} preload scripts using SCRIPT LOAD (default `true`)
+ *
  * @inherits EventEmitter
  * @event `ready`: Emitted when redis client connected and scripts loaded
+ * @event `error`: Emitted when a file read or script loading error found
  */
 
-function Lua(client, dirname, iterator) {
+function Lua(client, opts) {
   var self = this, len = 1
   this.ready = false
   this.client = client
-  this.__shas = {}
-  this.namer = iterator || camelCase
 
-  if (!dirname) {
-    throw new Error('A directory path is required.')
+  this.__shas = {}
+  this.__source = {}
+
+  opts || (opts = {})
+  this.options = opts
+
+  if (!opts.hasOwnProperty('preload')) {
+    opts.preload = true
   }
-  this.dir = dirname || []
+
+  this.namer = opts.iterator || camelCase
+  this.dir = opts.src || []
 
   // Ensure the directory is an array
   if (!Array.isArray(this.dir)) {
@@ -58,7 +69,10 @@ function Lua(client, dirname, iterator) {
   len += this.dir.length
 
   // Ready callback
-  function ready() {
+  function ready(err) {
+    if (err) {
+      return self.emit('error', err)
+    }
     if (!--len) {
       self.ready = true
       self.emit('ready')
@@ -97,10 +111,19 @@ Lua.VERSION = info.version
 Lua.prototype.scriptWrap = function(name) {
   var self = this
     , sha = this.__shas[name]
+    , code = this.__source[name]
     , client = this.client
-  if (!sha) throw new Error('Script name `' + name + '` does not exist.')
+    , preload = this.options.preload
+    , args = slice.call(arguments)
+
+  if (preload && !sha) throw new Error('Script name `' + name + '` does not exist.')
+
   return function() {
-    client.EVALSHA.apply(client, [sha].concat(slice.call(arguments)))
+    if (preload) {
+      client.EVALSHA.apply(client, [sha].concat(args))
+    } else {
+      client.EVAL.apply(client, [code].concat(args))
+    }
     return self
   }
 }
@@ -127,7 +150,7 @@ Lua.prototype.scriptLoad = function(name, source, next) {
   this.client.send_command('SCRIPT', ['LOAD', source], function(err, sha) {
     if (err) {
       if (next) return next(err)
-      return self.emit('error', new Error('Unable to load script: `' + name + '` - ' + err))
+      return self.emit('error', new Error('Unable to load script: `' + name + '` - ' + err), err)
     }
     self.__shas[name] = sha
     fn = self.scriptWrap(name)
@@ -155,6 +178,10 @@ Lua.prototype.scriptLoadAll = function(dir, next) {
   }
   function isDir(path) {
     self.scriptLoadAll(path, function(err, resp) {
+      if (err) {
+        if (next) return next(err)
+        return self.emit('error', new Error('Error loading scripts - ' + err), err)
+      }
       resp && (resp = resp.concat(resp))
       callback()
     })
@@ -163,16 +190,26 @@ Lua.prototype.scriptLoadAll = function(dir, next) {
     fs.readFile(path, 'utf-8', function(err, source) {
       if (err) {
         if (next) return next(err)
-        return self.emit('error', new Error('Error reading file `' + file + '` - ' + err))
+        return self.emit('error', new Error('Error reading file `' + file + '` - ' + err), err)
       }
       fnName = self.namer(file.replace('.lua', ''))
-      self.scriptLoad(fnName, source, function(err) {
-        if (err) {
-          return self.emit('error', new Error('Unable to load script: `' + file + '` - ' + err))
-        }
-        resp.push(slice.call(arguments))
+
+      // Store the source code for direct use
+      self.__source[fnName] = source
+
+      // Check to see if the script should be preloaded
+      if (self.options.preload) {
+        self.scriptLoad(fnName, source, function(err) {
+          if (err) {
+            if (next) return next(err)
+            return self.emit('error', err)
+          }
+          resp.push(slice.call(arguments))
+          callback()
+        })
+      } else {
         callback()
-      })
+      }
     })
   }
   fs.readdir(dir, function(err, files) {
@@ -180,7 +217,7 @@ Lua.prototype.scriptLoadAll = function(dir, next) {
     if (!len) return next(null, resp)
     if (err) {
       if (next) return next(err)
-      return self.emit('error', new Error('Could not load scripts from dir `' + dir + '` ' + err))
+      return self.emit('error', new Error('Could not load scripts from dir `' + dir + '` ' + err), err)
     }
     files.forEach(function(file, key) {
       var path = dir + '/' + file
@@ -193,13 +230,6 @@ Lua.prototype.scriptLoadAll = function(dir, next) {
   })
   return this
 }
-
-/**
- * Simple getter for finding the SHA for a given script name
- *
- * @param {String} script name
- * @return {String} redis generated SHA
- */
 
 Lua.prototype.getSHA = function(name) {
   return this.__shas[name]

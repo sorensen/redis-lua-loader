@@ -114,11 +114,12 @@ Lua.prototype.scriptWrap = function(name) {
     , code = this.__source[name]
     , client = this.client
     , preload = this.options.preload
-    , args = slice.call(arguments)
 
   if (preload && !sha) throw new Error('Script name `' + name + '` does not exist.')
 
   return function() {
+    var args = slice.call(arguments)
+
     if (preload) {
       client.EVALSHA.apply(client, [sha].concat(args))
     } else {

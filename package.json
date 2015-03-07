@@ -13,7 +13,7 @@
   },
   "main": "index.js",
   "scripts": {
-    "test": "npm run hint && ./node_modules/mocha/bin/mocha -R spec test/index.js",
+    "test": "./node_modules/mocha/bin/mocha -R spec test/index.js",
     "hint": "jshint *.js *.json"
   },
   "dependencies": {

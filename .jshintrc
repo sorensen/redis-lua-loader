@@ -2,22 +2,22 @@
   "node": true
 , "asi": true
 , "nonstandard": true
-, "es5": true
-, "expr": true
 , "strict": false
-, "loopfunc": true
 , "smarttabs": true
-, "maxlen": 90
+, "maxlen": 1800
 , "newcap": false
+, "expr": true
 , "undef": true
 , "unused": false
 , "onecase": true
-, "indent": 2
 , "laxcomma": true
 , "laxbreak": true
 , "white": false
 , "shadow": true
 , "proto": true
+, "loopfunc": true
+, "boss": true
+, "validthis": true
 , "globals": {
     "describe": false
   , "it": false

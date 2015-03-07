@@ -1,32 +1,24 @@
 'use strict';
 
+// require('./mock')
+
 var assert = require('assert')
   , ase = assert.strictEqual
   , fs = require('fs')
   , Lua = require('../index')
   , redis = require('redis')
   , path = __dirname + '/lua'
+  , camelCase = require('camel-case')
   , files = fs.readdirSync(path)
 
-/**
- * Convert string into camel case
- *
- * @param {String} input
- * @return {String} output
- */
-
-function camelCase(str) { 
-  return str
-    .replace('_', '-')
-    .toLowerCase()
-    .replace(/-(.)/g, function(match, group) {
-      return group.toUpperCase()
-    })
-}
-
+// These tests run against a local redis instance
 describe('Lua', function() {
   var db = redis.createClient()
     , lua = new Lua(db, {src: path})
+
+  lua.on('error', function(err) {
+    throw err
+  })
 
   it('should emit a `ready` event', function(done) {
     lua.ready ? done() : lua.on('ready', done)
@@ -38,9 +30,7 @@ describe('Lua', function() {
 
   it('should have loaded all lua scripts', function() {
     ase(files.length, Object.keys(lua.__shas).length)
-    files.forEach(function(file) {
-      ase(typeof lua.getSHA(file.replace('.lua', '')), 'string')
-    })
+    ase(files.length, Object.keys(lua.__source).length)
   })
 
   it('should create a script wrapper function', function() {
@@ -60,7 +50,6 @@ describe('Lua', function() {
       src: __dirname + '/lua2'
     })
     lua2.on('ready', function() {
-      ase(typeof lua2.getSHA('returnOne'), 'string')
       ase(typeof lua2.returnOne, 'function')
       done()
     })
@@ -78,7 +67,6 @@ describe('Lua', function() {
       ase(typeof lua3.test, 'function')
       files.forEach(function(file) {
         file = file.replace('.lua', '')
-        ase(typeof lua3.getSHA(file), 'string')
         ase(typeof lua3[camelCase(file)], 'function')
       })
       done()

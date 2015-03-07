@@ -6,28 +6,13 @@
 
 var EventEmitter = require('events').EventEmitter
   , fs = require('fs')
+  , path = require('path')
+  , camelCase = require('camel-case')
+  , loadDir = require('load-dir')
+  , onReady = require('on-ready')
+  , async = require('async')
+  , debug = require('debug')('redis-lua-loader')
   , slice = Array.prototype.slice
-  , concat = Array.prototype.concat
-  , toString = Object.prototype.toString
-  , info = require('./package.json')
-  , noop = function() {}
-
-/**
- * Convert string into camel case
- *
- * @param {String} input
- * @return {String} output
- */
-
-function camelCase(str) { 
-  return str
-    .replace(/_/g, '-')
-    .replace(/\//g, '-')
-    .toLowerCase()
-    .replace(/-(.)/g, function(match, group) {
-      return group.toUpperCase()
-    })
-}
 
 /**
  * Lua script loader and function wrapper
@@ -36,7 +21,6 @@ function camelCase(str) {
  * @param {Object} options (optional)
  *   - `src` {String|Array} lua script directory
  *   - `iterator` {Function} filename to method namer
- *   - `preload` {Boolean} preload scripts using SCRIPT LOAD (default `true`)
  *
  * @inherits EventEmitter
  * @event `ready`: Emitted when redis client connected and scripts loaded
@@ -44,48 +28,33 @@ function camelCase(str) {
  */
 
 function Lua(client, opts) {
-  var self = this, len = 1
-  this.ready = false
+  var self = this
+    , len = 2
+
   this.client = client
+  this.__shas = {}   // container for loaded SHA references (preload=true)
+  this.__source = {} // container for direct EVAL (preload=false)
 
-  this.__shas = {}
-  this.__source = {}
+  this.options = opts || {}
+  this.namer = this.options.iterator || camelCase
+  this.dir = this.options.src || []
 
-  opts || (opts = {})
-  this.options = opts
-
-  if (!opts.hasOwnProperty('preload')) {
-    opts.preload = true
-  }
-
-  this.namer = opts.iterator || camelCase
-  this.dir = opts.src || []
+  if (!this.options.hasOwnProperty('preload')) this.options.preload = true
 
   // Ensure the directory is an array
-  if (!Array.isArray(this.dir)) {
-    this.dir = [this.dir]
-  }
-  // A ready event is needed for each directory load
-  len += this.dir.length
+  if (!Array.isArray(this.dir)) this.dir = [this.dir]
 
-  // Ready callback
-  function ready(err) {
-    if (err) {
-      return self.emit('error', err)
-    }
-    if (!--len) {
+  onReady(this.client, function(err) {
+    if (err) self.emit('error', err)
+    
+    self.scriptLoadAll(self.dir, function(err) {
+      if (err) return self.emit('error', err)
+
+      debug('[init] ready')
       self.ready = true
       self.emit('ready')
-    }
-  }
-  // Load all scripts for the given directories before emitting
-  this.dir.forEach(function(dir) { 
-    self.scriptLoadAll(dir, ready)
+    })
   })
-
-  // Wait for redis client ready event
-  if (this.client.ready) ready()
-  else this.client.on('ready', ready)
 }
 
 /*!
@@ -93,12 +62,6 @@ function Lua(client, opts) {
  */
 
 Lua.prototype.__proto__ = EventEmitter.prototype
-
-/*!
- * Current library version, should match `package.json`
- */
-
-Lua.VERSION = info.version
 
 /**
  * Create a function wrapper for executing a given Lua script name
@@ -109,22 +72,21 @@ Lua.VERSION = info.version
  */
 
 Lua.prototype.scriptWrap = function(name) {
+  debug('[scriptWrap] wrapping: name=`%s`', name)
+
   var self = this
     , sha = this.__shas[name]
     , code = this.__source[name]
     , client = this.client
     , preload = this.options.preload
 
-  if (preload && !sha) throw new Error('Script name `' + name + '` does not exist.')
+  if (preload && !sha) throw new Error('Script name `' + name + '` not loaded.')
+  if (!preload && !code) throw new Error('No code found for script `' + name + '`')
 
   return function() {
     var args = slice.call(arguments)
-
-    if (preload) {
-      client.EVALSHA.apply(client, [sha].concat(args))
-    } else {
-      client.EVAL.apply(client, [code].concat(args))
-    }
+    if (preload) client.EVALSHA.apply(client, [sha].concat(args))
+    else client.EVAL.apply(client, [code].concat(args))
     return self
   }
 }
@@ -139,14 +101,16 @@ Lua.prototype.scriptWrap = function(name) {
  */
 
 Lua.prototype.scriptLoad = function(name, source, next) {
+  debug('[scriptLoad] wrapping: name=`%s`', name)
+
   var self = this
     , ok = true, fn
 
   // Prevent naming conflicts
   if (self.hasOwnProperty(name)) {
-    ok = false
-    console.warn('Script naming conflict for `' + name + '`. Function not set.')
-    console.trace()
+    var err = new Error('Script naming conflict for `' + name + '`.')
+    if (next) return next(err)
+    return self.emit('error', err)
   }
   this.client.send_command('SCRIPT', ['LOAD', source], function(err, sha) {
     if (err) {
@@ -154,8 +118,7 @@ Lua.prototype.scriptLoad = function(name, source, next) {
       return self.emit('error', new Error('Unable to load script: `' + name + '` - ' + err), err)
     }
     self.__shas[name] = sha
-    fn = self.scriptWrap(name)
-    ok && (self[name] = fn)
+    var fn = self[name] = self.scriptWrap(name)
     return next && next(null, sha, fn)
   })
 }
@@ -168,72 +131,33 @@ Lua.prototype.scriptLoad = function(name, source, next) {
  * @api public
  */
 
-Lua.prototype.scriptLoadAll = function(dir, next) {
+Lua.prototype.scriptLoadAll = function(dirs, next) {
   var self = this
-    , resp = []
-    , len = 0
-    , fnName
   
-  function callback() {
-    --len || next && next(null, resp)
-  }
-  function isDir(path) {
-    self.scriptLoadAll(path, function(err, resp) {
-      if (err) {
-        if (next) return next(err)
-        return self.emit('error', new Error('Error loading scripts - ' + err), err)
-      }
-      resp && (resp = resp.concat(resp))
-      callback()
-    })
-  }
-  function isFile(path, file) {
-    fs.readFile(path, 'utf-8', function(err, source) {
-      if (err) {
-        if (next) return next(err)
-        return self.emit('error', new Error('Error reading file `' + file + '` - ' + err), err)
-      }
-      fnName = self.namer(file.replace('.lua', ''))
+  if (!Array.isArray(dirs)) dirs = [dirs]
 
-      // Store the source code for direct use
-      self.__source[fnName] = source
+  debug('[scriptLoadAll] loading: dirs=`[%s]`', dirs.join(', '))
 
-      // Check to see if the script should be preloaded
-      if (self.options.preload) {
-        self.scriptLoad(fnName, source, function(err) {
-          if (err) {
-            if (next) return next(err)
-            return self.emit('error', err)
-          }
-          resp.push(slice.call(arguments))
-          callback()
-        })
-      } else {
-        callback()
-      }
-    })
-  }
-  fs.readdir(dir, function(err, files) {
-    len = files.length
-    if (!len) return next(null, resp)
-    if (err) {
-      if (next) return next(err)
-      return self.emit('error', new Error('Could not load scripts from dir `' + dir + '` ' + err), err)
-    }
-    files.forEach(function(file, key) {
-      var path = dir + '/' + file
-      fs.stat(path, function(err, stats) {
-        if (stats.isDirectory()) return isDir(path)
-        if (stats.isFile() && !!~file.indexOf('.lua')) return isFile(path, file)
-        callback()
-      })
+  // This is syncronous
+  dirs.forEach(function(dir) {
+    loadDir(dir, function(fpath) {
+      var ext = path.extname(fpath)
+        , name = path.basename(fpath, ext)
+        , fnName = self.namer(name)
+
+      debug('[scriptLoadAll] found file: `%s`', fpath)
+
+      if (ext !== '.lua') return
+      
+      self.__source[fnName] = fs.readFileSync(fpath, 'utf8')
     })
   })
-  return this
-}
 
-Lua.prototype.getSHA = function(name) {
-  return this.__shas[name]
+  async.each(Object.keys(this.__source), function(fnName, cb) {
+    self.scriptLoad(fnName, self.__source[fnName], cb)
+  }, next)
+
+  return this
 }
 
 /**

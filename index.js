@@ -84,9 +84,33 @@ Lua.prototype.scriptWrap = function(name) {
   if (!preload && !code) throw new Error('No code found for script `' + name + '`')
 
   return function() {
-    var args = slice.call(arguments)
-    if (preload) client.EVALSHA.apply(client, [sha].concat(args))
-    else client.EVAL.apply(client, [code].concat(args))
+    var args = [sha].concat(slice.call(arguments))
+      , next = args.pop()
+      , cmd = 'EVALSHA'
+
+    // Create an error stub to get a more direct stack trace
+    var error = new Error('Error running lua script: `' + name + '`.')
+    error.source = code
+    error.sha = sha
+
+    // Script not loaded in redis, use the source luke
+    if (!preload) {
+      cmd = 'EVAL'
+      args[0] = code
+    }
+
+    // Add a callback wrapper to the script call, we want to provide a cleaner 
+    // error message with better context on what script was called
+    args.push(function(err) {
+      if (err) {
+        error.message += ' ' + err.message
+
+        if (next) return next(error)
+        self.emit('error', error)
+      }
+      if (next) return next.apply(next, arguments)
+    })
+    client[cmd].apply(client, args)
     return self
   }
 }

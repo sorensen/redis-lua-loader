@@ -5,7 +5,6 @@
 var assert = require('assert')
   , ase = assert.strictEqual
   , fs = require('fs')
-  , Lua = require('../index')
   , redis = require('redis')
   , path = __dirname + '/lua'
   , camelCase = require('camel-case')
@@ -13,7 +12,8 @@ var assert = require('assert')
 
 // These tests run against a local redis instance
 describe('Lua', function() {
-  var db = redis.createClient()
+  var Lua = require('../index')
+    , db = redis.createClient()
     , lua = new Lua(db, {src: path})
 
   lua.on('error', function(err) {
@@ -89,6 +89,24 @@ describe('Lua', function() {
     })
     eLua.on('ready', function() {
       throw new Error('Should not have made it to `ready` state')
+    })
+  })
+
+  it('should return custom `error` script error', function(done) {
+    var eLua = new Lua(db, {
+      src: __dirname + '/lua4'
+    })
+    eLua.on('ready', function() {
+      eLua.badJson(1, '{hi}', function(err) {
+        assert(err instanceof Error)
+
+        var source = fs.readFileSync(__dirname + '/lua4/bad-json.lua', 'utf8')
+
+        ase(typeof err.source, 'string')
+        ase(err.source, source)
+        ase(typeof err.sha, 'string')
+        done()
+      })
     })
   })
 
